@@ -909,8 +909,11 @@ task.spawn(function()
     end
 end)
 
-local removedObjects = {}
-local fpsBoostActive = false
+local removedObjects  = {}
+local fpsBoostActive  = false
+local noRenderActive  = false
+local noRenderObjects = {}   -- { obj, parent } stashed while no-render is on
+local noRenderCCE     = nil  -- the black ColorCorrectionEffect we inject
 
 local function enableFPSBoost()
     if fpsBoostActive then return end
@@ -956,6 +959,82 @@ local function disableFPSBoost()
     lighting.Brightness    = 1
 end
 
+local function enableNoRender()
+    if noRenderActive then return end
+    noRenderActive = true
+
+    local lighting = game:GetService("Lighting")
+
+    -- Kill ambient light so the 3-D world goes black
+    lighting.Brightness        = 0
+    lighting.GlobalShadows     = false
+    lighting.Ambient           = Color3.new(0, 0, 0)
+    lighting.OutdoorAmbient    = Color3.new(0, 0, 0)
+    lighting.FogColor          = Color3.new(0, 0, 0)
+    lighting.FogEnd            = 0.001
+    lighting.FogStart          = 0
+
+    -- Inject a full-black ColorCorrectionEffect so even emissive surfaces go dark
+    if not noRenderCCE then
+        noRenderCCE = Instance.new("ColorCorrectionEffect")
+        noRenderCCE.Name        = "_AzureNoRender"
+        noRenderCCE.Brightness  = -1
+        noRenderCCE.Contrast    = 0
+        noRenderCCE.Saturation  = -1
+        noRenderCCE.Parent      = lighting
+    end
+
+    -- Hide every BasePart / terrain decoration (NOT PlayerGui / CoreGui)
+    local removeClasses = {
+        "BasePart", "UnionOperation", "MeshPart", "SpecialMesh",
+        "Texture", "Decal", "ParticleEmitter", "Trail",
+        "Smoke", "Fire", "Sparkles", "Sky", "Atmosphere",
+        "SelectionBox", "SurfaceAppearance",
+    }
+    noRenderObjects = {}
+    for _, obj in ipairs(workspace:GetDescendants()) do
+        for _, cls in ipairs(removeClasses) do
+            if obj:IsA(cls) then
+                table.insert(noRenderObjects, { obj = obj, parent = obj.Parent })
+                obj.Parent = nil
+                break
+            end
+        end
+    end
+    for _, obj in ipairs(lighting:GetChildren()) do
+        if obj ~= noRenderCCE then
+            table.insert(noRenderObjects, { obj = obj, parent = obj.Parent })
+            obj.Parent = nil
+        end
+    end
+end
+
+local function disableNoRender()
+    if not noRenderActive then return end
+    noRenderActive = false
+
+    -- Restore all hidden objects
+    for _, entry in ipairs(noRenderObjects) do
+        pcall(function() entry.obj.Parent = entry.parent end)
+    end
+    noRenderObjects = {}
+
+    -- Remove the injected CCE
+    if noRenderCCE then
+        noRenderCCE:Destroy()
+        noRenderCCE = nil
+    end
+
+    -- Restore lighting defaults
+    local lighting = game:GetService("Lighting")
+    lighting.Brightness     = 1
+    lighting.GlobalShadows  = true
+    lighting.Ambient        = Color3.new(0.5, 0.5, 0.5)
+    lighting.OutdoorAmbient = Color3.new(0.5, 0.5, 0.5)
+    lighting.FogEnd         = 100000
+    lighting.FogStart       = 0
+end
+
 player.CharacterAdded:Connect(function()
     task.wait(2)
     buildStandRFCache()
@@ -994,7 +1073,6 @@ MainTab:Toggle({
     Default  = ENABLED.AutoBuyBuilding,
     Callback = function(v)
         ENABLED.AutoBuyBuilding = v
-        SaveConfig()
     end,
 })
 
@@ -1004,7 +1082,6 @@ MainTab:Slider({
     Value    = { Min = 1, Max = 50, Default = math.floor(1 / AUTO_BUY_DELAY) },
     Callback = function(v)
         AUTO_BUY_DELAY = 1 / v
-        SaveConfig()
     end,
 })
 
@@ -1013,7 +1090,6 @@ MainTab:Toggle({
     Default  = ENABLED.AutoUpgrade,
     Callback = function(v)
         ENABLED.AutoUpgrade = v
-        SaveConfig()
     end,
 })
 
@@ -1023,7 +1099,6 @@ MainTab:Slider({
     Value    = { Min = 0.1, Max = 5, Default = AUTO_UPGRADE_DELAY },
     Callback = function(v)
         AUTO_UPGRADE_DELAY = v
-        SaveConfig()
     end,
 })
 
@@ -1036,7 +1111,6 @@ MainTab:Input({
         local n = tonumber(v)
         if n and n >= 1 then
             AUTO_UPGRADE_AMOUNT = math.floor(n)
-            SaveConfig()
         end
     end,
 })
@@ -1046,7 +1120,6 @@ MainTab:Toggle({
     Default  = ENABLED.AutoClick,
     Callback = function(v)
         ENABLED.AutoClick = v
-        SaveConfig()
     end,
 })
 
@@ -1055,7 +1128,6 @@ MainTab:Toggle({
     Default  = ENABLED.AutoCashVine,
     Callback = function(v)
         ENABLED.AutoCashVine = v
-        SaveConfig()
     end,
 })
 
@@ -1064,7 +1136,6 @@ MainTab:Toggle({
     Default  = ENABLED.AutoPhoneOffer,
     Callback = function(v)
         ENABLED.AutoPhoneOffer = v
-        SaveConfig()
         if v and activeOffer then offerHandled = false respondToOffer() end
     end,
 })
@@ -1077,7 +1148,6 @@ UpgradeTab:Toggle({
     Default  = ENABLED.AutoRebirth,
     Callback = function(v)
         ENABLED.AutoRebirth = v
-        SaveConfig()
     end,
 })
 
@@ -1086,7 +1156,6 @@ UpgradeTab:Toggle({
     Default  = ENABLED.AutoAscend,
     Callback = function(v)
         ENABLED.AutoAscend = v
-        SaveConfig()
     end,
 })
 
@@ -1095,7 +1164,6 @@ UpgradeTab:Toggle({
     Default  = ENABLED.AutoEvolve,
     Callback = function(v)
         ENABLED.AutoEvolve = v
-        SaveConfig()
     end,
 })
 
@@ -1104,7 +1172,6 @@ UpgradeTab:Toggle({
     Default  = ENABLED.AutoPowerUpgrade,
     Callback = function(v)
         ENABLED.AutoPowerUpgrade = v
-        SaveConfig()
     end,
 })
 
@@ -1116,7 +1183,6 @@ MiscTab:Toggle({
     Default  = ENABLED.AutoOfflineCash,
     Callback = function(v)
         ENABLED.AutoOfflineCash = v
-        SaveConfig()
     end,
 })
 
@@ -1125,7 +1191,6 @@ MiscTab:Toggle({
     Default  = ENABLED.AutoTimeCash,
     Callback = function(v)
         ENABLED.AutoTimeCash = v
-        SaveConfig()
     end,
 })
 
@@ -1134,7 +1199,6 @@ MiscTab:Toggle({
     Default  = ENABLED.AutoEarnerBoost,
     Callback = function(v)
         ENABLED.AutoEarnerBoost = v
-        SaveConfig()
     end,
 })
 
@@ -1143,7 +1207,6 @@ MiscTab:Toggle({
     Default  = ENABLED.AutoMinigameRace,
     Callback = function(v)
         ENABLED.AutoMinigameRace = v
-        SaveConfig()
     end,
 })
 
@@ -1152,7 +1215,6 @@ MiscTab:Toggle({
     Default  = ENABLED.AutoMinigameTrade,
     Callback = function(v)
         ENABLED.AutoMinigameTrade = v
-        SaveConfig()
     end,
 })
 
@@ -1170,7 +1232,6 @@ OrchardTab:Toggle({
     Default  = ENABLED.AutoCollectFruit,
     Callback = function(v)
         ENABLED.AutoCollectFruit = v
-        SaveConfig()
     end,
 })
 
@@ -1198,7 +1259,6 @@ OrchardTab:Toggle({
     Default  = ENABLED.AutoEatFruit,
     Callback = function(v)
         ENABLED.AutoEatFruit = v
-        SaveConfig()
     end,
 })
 
@@ -1215,7 +1275,6 @@ eatDropdownRef = OrchardTab:Dropdown({
     Value    = eatDefault,
     Callback = function(v)
         EAT_FRUIT_SELECTED = v
-        SaveConfig()
     end,
 })
 
@@ -1225,7 +1284,6 @@ OrchardTab:Toggle({
     Default  = ENABLED.AutoSellFruit,
     Callback = function(v)
         ENABLED.AutoSellFruit = v
-        SaveConfig()
     end,
 })
 
@@ -1242,7 +1300,6 @@ sellDropdownRef = OrchardTab:Dropdown({
     Value    = sellDefault,
     Callback = function(v)
         SELL_FRUIT_SELECTED = v
-        SaveConfig()
     end,
 })
 
@@ -1299,7 +1356,6 @@ SettTab:Dropdown({
     Value    = PHONE_OFFER_RESPONSE,
     Callback = function(v)
         PHONE_OFFER_RESPONSE = v
-        SaveConfig()
     end,
 })
 
@@ -1308,7 +1364,6 @@ SettTab:Toggle({
     Default  = ENABLED.AntiAFK,
     Callback = function(v)
         ENABLED.AntiAFK = v
-        SaveConfig()
     end,
 })
 
@@ -1317,8 +1372,15 @@ SettTab:Toggle({
     Default  = ENABLED.BoostFPS,
     Callback = function(v)
         ENABLED.BoostFPS = v
-        SaveConfig()
         if v then enableFPSBoost() else disableFPSBoost() end
+    end,
+})
+
+SettTab:Toggle({
+    Title    = "No Render (Black Screen)",
+    Default  = false,
+    Callback = function(v)
+        if v then enableNoRender() else disableNoRender() end
     end,
 })
 
