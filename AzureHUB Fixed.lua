@@ -645,31 +645,104 @@ end
 --   "Lemon"
 --   "Orange [Juicy x2, Sweet x1]"
 -- -------------------------------------------------------
+-- -------------------------------------------------------
+-- Mutation key → human-readable display name.
+-- Keys follow the pattern {StatName}{Tier} where Tier is 1-4.
+-- Sourced from Cobalt snippets: Value4, Rate4, GrowthRate1, etc.
+-- -------------------------------------------------------
+local MUTATION_KEY_NAMES = {
+    -- Yield / Value mutations
+    Value1 = "Uncommon Yield",
+    Value2 = "Rare Yield",
+    Value3 = "Epic Yield",
+    Value4 = "Legendary Yield",
+    -- Rate mutations (income tick rate)
+    Rate1  = "Uncommon Rate",
+    Rate2  = "Rare Rate",
+    Rate3  = "Epic Rate",
+    Rate4  = "Legendary Rate",
+    -- Growth rate mutations
+    GrowthRate1 = "Uncommon Growth",
+    GrowthRate2 = "Rare Growth",
+    GrowthRate3 = "Epic Growth",
+    GrowthRate4 = "Legendary Growth",
+    -- Duration mutations
+    Duration1 = "Uncommon Duration",
+    Duration2 = "Rare Duration",
+    Duration3 = "Epic Duration",
+    Duration4 = "Legendary Duration",
+    -- Quantity / multi-fruit mutations
+    Quantity1 = "Uncommon Quantity",
+    Quantity2 = "Rare Quantity",
+    Quantity3 = "Epic Quantity",
+    Quantity4 = "Legendary Quantity",
+    -- Power mutations
+    Power1 = "Uncommon Power",
+    Power2 = "Rare Power",
+    Power3 = "Epic Power",
+    Power4 = "Legendary Power",
+    -- Catch-all: any unrecognised key is shown as-is
+}
+
+local function mutationKeyToDisplay(key)
+    return MUTATION_KEY_NAMES[key] or key
+end
+
 local function buildFruitLabel(entry, index)
-    -- entry format: { evoIndex (1-based), mutations, count, fruitObj }
+    -- entry format: { evoIndex (0-based), mutations, count, fruitObj }
     local evoIndex  = entry[1]
     local mutations = entry[2]
-    -- evoIndex is 0-based; EVOLUTION_NAMES is 1-based, so add 1 for lookup
-    local evoName   = (type(evoIndex) == "number" and EVOLUTION_NAMES[evoIndex + 1]) or ("Evo#" .. tostring(evoIndex))
+    local fruitObj  = entry[4]   -- live fruit object, present on primary path
 
-    local mutParts = {}
-    if type(mutations) == "table" then
-        for mutName, count in pairs(mutations) do
-            if type(count) == "number" and count > 0 then
-                table.insert(mutParts, mutName .. " x" .. count)
+    -- ── Preferred path: ask the fruit object for its own name ────────────
+    -- :GetFruitName() returns the plain display name (e.g. "Legendary Yield Lemon")
+    -- :GetScientificNameRichText() returns the same wrapped in rich-text tags.
+    -- We strip rich-text tags so the string is safe to use as a dropdown key.
+    local label = nil
+    if fruitObj then
+        pcall(function()
+            local raw = fruitObj:GetFruitName()
+            if type(raw) == "string" and #raw > 0 then
+                label = raw
             end
+        end)
+        if not label then
+            pcall(function()
+                -- strip <b>, </b>, <i>, </i>, <font …>, </font> etc.
+                local rich = fruitObj:GetScientificNameRichText()
+                if type(rich) == "string" and #rich > 0 then
+                    label = rich:gsub("<[^>]+>", "")
+                end
+            end)
         end
-        table.sort(mutParts)
     end
 
-    local label
-    if #mutParts > 0 then
-        label = evoName .. " [" .. table.concat(mutParts, ", ") .. "]"
-    else
-        label = evoName
+    -- ── Fallback path: build the name ourselves from evo + mutation keys ──
+    if not label then
+        -- evoIndex is 0-based; EVOLUTION_NAMES is 1-based, so add 1 for lookup
+        local evoName = (type(evoIndex) == "number" and EVOLUTION_NAMES[evoIndex + 1])
+                     or ("Evo#" .. tostring(evoIndex))
+
+        local mutParts = {}
+        if type(mutations) == "table" then
+            for mutKey, val in pairs(mutations) do
+                if type(val) == "number" and val > 0 then
+                    table.insert(mutParts, mutationKeyToDisplay(mutKey))
+                elseif type(val) == "boolean" and val then
+                    table.insert(mutParts, mutationKeyToDisplay(mutKey))
+                end
+            end
+            table.sort(mutParts)
+        end
+
+        if #mutParts > 0 then
+            label = table.concat(mutParts, " ") .. " " .. evoName
+        else
+            label = evoName
+        end
     end
 
-    -- Guarantee uniqueness by appending slot number if a duplicate already exists
+    -- ── Guarantee uniqueness by appending slot number if a duplicate exists ─
     local base = label
     local n = 2
     local seen = {}
