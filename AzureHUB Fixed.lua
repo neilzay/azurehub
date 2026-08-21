@@ -130,7 +130,11 @@ local function LoadConfig()
             if decoded then
                 if decoded.ENABLED then
                     for k, v in pairs(decoded.ENABLED) do
-                        ENABLED[k] = v
+                        -- Never restore BoostFPS or visual-only flags from config;
+                        -- they trigger side-effects at startup if auto-applied.
+                        if k ~= "BoostFPS" then
+                            ENABLED[k] = v
+                        end
                     end
                 end
                 if decoded.AUTO_BUY_DELAY      then AUTO_BUY_DELAY       = decoded.AUTO_BUY_DELAY      end
@@ -1584,7 +1588,7 @@ SettTab:Toggle({
 
 SettTab:Toggle({
     Title    = "Boost FPS",
-    Default  = ENABLED.BoostFPS,
+    Default  = false,   -- never auto-fire at startup; user toggles manually
     Callback = function(v)
         ENABLED.BoostFPS = v
         if v then enableFPSBoost() else disableFPSBoost() end
